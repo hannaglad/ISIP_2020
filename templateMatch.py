@@ -7,8 +7,9 @@ import imutils
 import os
 import math
 from scipy.spatial.distance import pdist, squareform
-import angle_draft as shit
-
+####TO DO #####
+# electrode detection
+# medial axis skeletonization of the implants, for spiral fitting
 dataDir = './Handout/DATA/'
 pre = dataDir+'ID06/ID06pre.png'
 post = dataDir+'ID06/ID06post.png'
@@ -180,9 +181,9 @@ def fit_spiral(center_pre,x,y):
     bfit = solution[0]
     return afit,bfit,theta # values for fiting a spiral in exponential,polar coordinates form
 
-we = fit_spiral(center_pre, coordinates[:9,0], coordinates[:9,1])
+we = fit_spiral(center_pre, coordinates[:,0], coordinates[:,1])
 thetas = np.arange(np.min(we[2]),np.max(we[2]),(np.max(we[2])-np.min(we[2]))/100) # simulate angles for smoothness
-rfitted = we[0]*np.exp(we[1]*thetas)
+rfitted = we[0]*np.exp(we[1]*thetas) # simulate length
 plt.imshow(post)
 
 # ploted as converted into cartesian
