@@ -130,8 +130,8 @@ def skel(pre, post_masked_processed):
 
     return skeleton
 
-def blob_detection(post, draw):
-    img = cv2.normalize(post, None, 0, 255, cv2.NORM_MINMAX)
+def blob_detection(post_masked_processed, draw):
+    img = cv2.normalize(post_masked_processed, None, 0, 255, cv2.NORM_MINMAX)
     img = cv2.medianBlur(img, 11)
 
     th2 = filters.threshold_sauvola(img)
@@ -273,8 +273,8 @@ if __name__=="__main__":
 
     # Load data
     dataDir = './Handout/DATA/'
-    pre = dataDir+'ID17/ID17pre.png'
-    post = dataDir+'ID17/ID17post.png'
+    pre = dataDir+'ID06/ID06pre.png'
+    post = dataDir+'ID06/ID06post.png'
     pre = cv2.imread(pre, 0)
     post = cv2.imread(post, 0)
 
@@ -286,23 +286,21 @@ if __name__=="__main__":
     post_masked_processed = full_preprocess(post_masked)
 
     # Find blobs and their centers in post operative image
-    blobs = blob_detection(post, False)
+    blobs_spiral = blob_detection(post_masked_processed, False)
+    coordinates = blob_detection(post, False)
     blob_img = blob_detection(post, True)
-    display(blob_img)
 
     # Skeletonize the post operative image to fit spiral
-    #skeleton = med_axis(post_masked_processed)
-    #coordinates = get_skel_coordinates(skeleton)
-    #coordinates = np.vstack((coordinates,blobs))
+    skeleton = med_axis(post_masked_processed)
+    coordinates_spiral = get_skel_coordinates(skeleton)
+    coordinates_spiral = np.vstack((coordinates_spiral,blobs_spiral))
 
-    coordinates = np.vstack(blobs)
-    #coordinates = blobs
     # Estimate spiral center in pre operative image
     center_pre = find_center(pre, pre_binarized, False)[0,0,0:2]
 
     # Fit spiral
-    p = fmin(fit_spiral_opt,center_pre,args=(coordinates[:,0], coordinates[:,1])) # minimize spiral error by finding the best center
-    we = fit_spiral(p, coordinates[:,0], coordinates[:,1])# take the best center and fit the spiral
+    p = fmin(fit_spiral_opt,center_pre,args=(coordinates_spiral[:,0], coordinates_spiral[:,1])) # minimize spiral error by finding the best center
+    we = fit_spiral(p, coordinates_spiral[:,0], coordinates_spiral[:,1])# take the best center and fit the spiral
     thetas = np.arange(np.min(we[2]),np.max(we[2]),(np.max(we[2])-np.min(we[2]))/100) # simulate angles for smoothness
     rfitted = we[0]*np.exp(we[1]*thetas)
 
