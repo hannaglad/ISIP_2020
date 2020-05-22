@@ -7,7 +7,7 @@ import imutils
 import os
 import math
 from scipy.spatial.distance import pdist, squareform
-from skimage.morphology import skeletonize
+from skimage.morphology import skeletonize, medial_axis
 from skimage.util import invert
 from scipy.optimize import fmin
 
@@ -77,7 +77,8 @@ def fit_spiral_opt(center_pre,x,y):
     afit = np.exp(solution[1])
     bfit = solution[0]
     rfit = afit*np.exp(bfit*theta)
-    return rmse(rfit,r)
+    #return rmse(rfit,r)
+    return np.mean(abs(rfit-r))
 
 def find_center(pre, pre_binarized, draw):
     cimg = cv2.cvtColor(pre,cv2.COLOR_GRAY2BGR)
@@ -125,66 +126,71 @@ def skel(pre, post_masked_processed):
     skeleton = skeletonize(th2)
     skeleton = skeleton*255
     skeleton = skeleton.astype('uint8')
-    skel_dilate = cv2.dilate(skeleton, kernel, iterations=5)
+    #skel_dilate = cv2.dilate(skeleton, kernel, iterations=5)
 
-    return skel_dilate
+    return skeleton
 
-def blob_detection(post_processed, draw):
-    # Find contours in post operative image
-    #th2 = cv2.adaptiveThreshold(img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 21,0)
+def blob_detection(post, draw):
+    img = cv2.normalize(post, None, 0, 255, cv2.NORM_MINMAX)
+    img = cv2.medianBlur(img, 11)
 
-    th2 = post_processed
+    th2 = filters.threshold_sauvola(img)
     th2 = 255-th2
+    th2 = th2.astype("uint8")
+# Set our filtering parameters
+# Initialize parameter settiing using cv2.SimpleBlobDetector
     params = cv2.SimpleBlobDetector_Params()
 
-     # Set Area filtering parameters
+# Set Area filtering parameters
     params.filterByArea = True
-    params.minArea = 50
+    params.minArea = 10
 
-    # Set Circularity filtering parameters
+# Set Circularity filtering parameters
     params.filterByCircularity = True
-    params.minCircularity = 0.5
+    params.minCircularity = 0.1
 
-    # Set Convexity filtering parameters
+# Set Convexity filtering parameters
     params.filterByConvexity = True
     params.minConvexity = 0.1
 
-    # Set inertia filtering parameters
+# Set inertia filtering parameters
     params.filterByInertia = True
     params.minInertiaRatio = 0.01
 
-    # Create a detector with the parameters
+# Create a detector with the parameters
     detector = cv2.SimpleBlobDetector_create(params)
     kernel = np.ones((5,5), np.uint8)
-
-    # Erosion and dilation of binarized image
-    erosion = cv2.erode(th2, kernel, iterations=3)
+    erosion = cv2.erode(th2, kernel, iterations=2)
     dilation = cv2.dilate(erosion, kernel, iterations=6)
-    #Detect blobs
+
+
+# Detect blobs
     keypoints = detector.detect(dilation)
 
-    if draw == False :
-        coordinates = []
+# Draw blobs on our image as red circles
+    blank = np.zeros((1, 1))
+    blobs = cv2.drawKeypoints(th2, keypoints, blank, (0, 0, 255),
+                          cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+
+    number_of_blobs = len(keypoints)
+    text = "Number of Circular Blobs: " + str(len(keypoints))
+    cv2.putText(blobs, text, (20, 550),
+            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 100, 255), 2)
+
+    # Save blob centers
+    if draw==True:
+        return blobs
+    else :
+        result = []
         for point in keypoints:
             x = point.pt[0]
             y = point.pt[1]
-            #size = point.size
-            coordinates.append([x,y])
-
-        return coordinates
-
-    elif draw == True :
-         # Draw blobs on our image as red circles
-         blank = np.zeros((1, 1))
-         blobs = cv2.drawKeypoints(th2, keypoints, blank, (0, 0, 255),cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
-         number_of_blobs = len(keypoints)
-         text = "Number of Circular Blobs: " + str(len(keypoints))
-         cv2.putText(blobs, text, (20, 550), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 100, 255), 2)
-         return blobs
+            result.append([x,y])
+        return result
 
 def get_skel_coordinates(skeleton):
     coordinates = np.transpose(np.nonzero(skeleton==255))
-    return coordinates
+    return np.flip(coordinates, 1)
 
 def findElectrodes(post, post_reduced_processed):
 
@@ -207,12 +213,68 @@ def findElectrodes(post, post_reduced_processed):
         cv2.circle(post, (cX, cY),3, (0,255,0), -1)
     return centers
 
+def med_axis(post_masked_processed):
+    th2 = cv2.GaussianBlur(post_masked_processed, (17,17),5)
+    kernel = np.ones((3,3), np.uint8)
+
+    th2 = cv2.erode(th2, kernel, iterations=5)
+    th2 = cv2.dilate(th2, kernel, iterations=20)
+
+    th2 = cv2.normalize(th2, None, 0, 1, cv2.NORM_MINMAX)
+    skel, distance = medial_axis(th2, return_distance=True)
+
+    distance_on_skel = ((distance*skel)*255).astype('uint8')
+    ret2, distance_on_skel = cv2.threshold(distance_on_skel, 0, 255, cv2.THRESH_BINARY)
+
+    return distance_on_skel
+
+
+def get_labels(coordinates,center_pre):
+    coordinates = coordinates-center_pre
+    candidate_index = np.argmax(coordinates[:,0])
+    candidate = coordinates[candidate_index,:]
+    coordinates = np.delete(coordinates,candidate_index,axis=0)
+    v_lengths = np.sqrt(np.sum(coordinates**2,axis=1))
+    candidate_length = np.sqrt(np.sum(candidate**2))
+    labels = [candidate]
+    while coordinates.shape[0]>1:
+        v_lengths = np.sqrt(np.sum(coordinates**2,axis=1))
+        angles = np.arccos(np.sum(candidate*coordinates,axis=1)/(candidate_length*v_lengths))
+        closest_angles = np.argpartition(np.abs(angles),min(3,coordinates.shape[0]-1))
+        angle_idx = closest_angles[:min(3,coordinates.shape[0])]
+        candidates = coordinates[angle_idx,:]
+        closest = candidates[np.argmin(np.sqrt(np.sum((candidates-candidate)**2,axis=1))),:]
+        candidate_index = np.where(coordinates==closest)
+        candidate = coordinates[candidate_index[0][0]]
+        coordinates = np.delete(coordinates,candidate_index[0][0],axis=0)
+        candidate_length = np.sqrt(np.sum(candidate**2))
+        labels.append(candidate)
+    labels.append(np.ndarray.flatten(coordinates))
+    return labels
+
+def insertion_depth(coordinates,center_pre):
+
+
+    # determine position according to the center reference point
+    coordinates = coordinates-center_pre
+    # get their angle by the dotproduct calculation
+    v_lengths = np.sqrt(np.sum(coordinates**2,axis=1))
+    p = np.arccos(np.sum(coordinates[11]*coordinates,axis=1)/(v_lengths[11]*v_lengths))
+    # shift mapping from -1 1
+    p2 = np.copy(p) # avoiding unintentional mutations
+    for values in range(len(p)-1,0,-1):
+        if p[values]>p[values-1]:
+            p2[values-1] = 2*np.pi- p2[values-1]
+    # switch to degrees round and sort in reverse
+    p2 = np.degrees(p2)
+    return np.round(p2[::-1])
+
 if __name__=="__main__":
 
     # Load data
     dataDir = './Handout/DATA/'
-    pre = dataDir+'ID06/ID06pre.png'
-    post = dataDir+'ID06/ID06post.png'
+    pre = dataDir+'ID17/ID17pre.png'
+    post = dataDir+'ID17/ID17post.png'
     pre = cv2.imread(pre, 0)
     post = cv2.imread(post, 0)
 
@@ -224,31 +286,43 @@ if __name__=="__main__":
     post_masked_processed = full_preprocess(post_masked)
 
     # Find blobs and their centers in post operative image
-    blobs = blob_detection(post_processed, False)
-    blob_img = blob_detection(post_processed, True)
-    
-    # Find contours
-    contours = findElectrodes(post, post_masked_processed)
+    blobs = blob_detection(post, False)
+    blob_img = blob_detection(post, True)
+    display(blob_img)
 
     # Skeletonize the post operative image to fit spiral
-    skeleton = skel(pre, post_masked_processed)
-    coordinates = get_skel_coordinates(skeleton)
-    coordinates = np.vstack((contours, coordinates, blobs))
+    #skeleton = med_axis(post_masked_processed)
+    #coordinates = get_skel_coordinates(skeleton)
+    #coordinates = np.vstack((coordinates,blobs))
 
+    coordinates = np.vstack(blobs)
+    #coordinates = blobs
     # Estimate spiral center in pre operative image
     center_pre = find_center(pre, pre_binarized, False)[0,0,0:2]
 
     # Fit spiral
     p = fmin(fit_spiral_opt,center_pre,args=(coordinates[:,0], coordinates[:,1])) # minimize spiral error by finding the best center
-    we = fit_spiral(p, coordinates[:9,0], coordinates[:9,1]) # take the best center and fit the spiral
+    we = fit_spiral(p, coordinates[:,0], coordinates[:,1])# take the best center and fit the spiral
     thetas = np.arange(np.min(we[2]),np.max(we[2]),(np.max(we[2])-np.min(we[2]))/100) # simulate angles for smoothness
     rfitted = we[0]*np.exp(we[1]*thetas)
 
     # Plot spiral
     plt.plot()
-    plt.imshow(post)
+    plt.imshow(blob_img)
     #ploted as converted into cartesian
     plt.plot(p[0]+rfitted*np.sin(thetas),p[1]+rfitted*np.cos(thetas))
     plt.plot(p[0],p[1],"ro")
     plt.show()
     plt.close()
+
+    labels = get_labels(coordinates, center_pre) + center_pre
+    count=0
+    for i in labels:
+        print(i)
+        x = i[0]
+        y = i[1]
+        x = int(x)
+        y = int(y)
+        cv2.putText(blob_img, str(12-count), (x,y), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0),2)
+        count+=1
+    display(blob_img)
