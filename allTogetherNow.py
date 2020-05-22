@@ -104,12 +104,11 @@ def skel(pre, post_masked_processed):
     skeleton = skeletonize(th2)
     skeleton = skeleton*255
     skeleton = skeleton.astype('uint8')
-    print(skeleton)
     skel_dilate = cv2.dilate(skeleton, kernel, iterations=5)
 
     return skel_dilate
 
-def blob_detection(post_processed, draw):
+def blob_detection(post_processed):
     # Find contours in post operative image
     #th2 = cv2.adaptiveThreshold(img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 21,0)
 
@@ -117,17 +116,17 @@ def blob_detection(post_processed, draw):
     th2 = 255-th2
     params = cv2.SimpleBlobDetector_Params()
 
-    # Set Area filtering parameters
+     # Set Area filtering parameters
     params.filterByArea = True
-    params.minArea = 100
+    params.minArea = 50
 
     # Set Circularity filtering parameters
     params.filterByCircularity = True
-    params.minCircularity = 0.9
+    params.minCircularity = 0.5
 
     # Set Convexity filtering parameters
     params.filterByConvexity = True
-    params.minConvexity = 0.5
+    params.minConvexity = 0.1
 
     # Set inertia filtering parameters
     params.filterByInertia = True
@@ -142,81 +141,18 @@ def blob_detection(post_processed, draw):
     dilation = cv2.dilate(erosion, kernel, iterations=6)
     #Detect blobs
     keypoints = detector.detect(dilation)
+    coordinates = []
+    for point in keypoints:
+        x = point.pt[0]
+        y = point.pt[1]
+        #size = point.size
+        coordinates.append([x,y])
 
-    # Draw blobs on our image as red circles
-    if draw == True :
-        blank = np.zeros((1, 1))
-        blobs = cv2.drawKeypoints(th2, keypoints, blank, (0, 0, 255),
-                          cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
-
-        number_of_blobs = len(keypoints)
-        text = "Number of Circular Blobs: " + str(len(keypoints))
-        cv2.putText(blobs, text, (20, 550),
-            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 100, 255), 2)
-        result = []
-        for point in keypoints:
-            x = point.pt[0]
-            y = point.pt[1]
-            #size = point.size
-            result.append([x,y])
-        return blobs
+    return coordinates
 
 def get_skel_coordinates(skeleton):
     coordinates = np.transpose(np.nonzero(skeleton==255))
     return coordinates
-
-def blob_detection(post_processed, draw):
-    # Find contours in post operative image
-    #th2 = cv2.adaptiveThreshold(img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 21,0)
-
-    th2 = post_processed
-    th2 = 255-th2
-    params = cv2.SimpleBlobDetector_Params()
-
-    # Set Area filtering parameters
-    params.filterByArea = True
-    params.minArea = 100
-
-    # Set Circularity filtering parameters
-    params.filterByCircularity = True
-    params.minCircularity = 0.9
-
-    # Set Convexity filtering parameters
-    params.filterByConvexity = True
-    params.minConvexity = 0.5
-
-    # Set inertia filtering parameters
-    params.filterByInertia = True
-    params.minInertiaRatio = 0.01
-
-    # Create a detector with the parameters
-    detector = cv2.SimpleBlobDetector_create(params)
-    kernel = np.ones((5,5), np.uint8)
-
-    # Erosion and dilation of binarized image
-    erosion = cv2.erode(th2, kernel, iterations=3)
-    dilation = cv2.dilate(erosion, kernel, iterations=6)
-    #Detect blobs
-    keypoints = detector.detect(dilation)
-
-    # Draw blobs on our image as red circles
-    if draw == True :
-        blank = np.zeros((1, 1))
-        blobs = cv2.drawKeypoints(th2, keypoints, blank, (0, 0, 255),
-                          cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
-
-        number_of_blobs = len(keypoints)
-        text = "Number of Circular Blobs: " + str(len(keypoints))
-        cv2.putText(blobs, text, (20, 550),
-            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 100, 255), 2)
-        result = []
-        for point in keypoints:
-            x = point.pt[0]
-            y = point.pt[1]
-            #size = point.size
-            result.append([x,y])
-        return blobs
-
 
 if __name__=="__main__":
 
@@ -235,11 +171,15 @@ if __name__=="__main__":
     post_masked_processed = full_preprocess(post_masked)
 
     # Find blobs and their centers in post operative image
-    blobs = blob_detection(post_processed, False)
+    blobs = blob_detection(post_processed)
 
     # Skeletonize the post operative image to fit spiral
     skeleton = skel(pre, post_masked_processed)
     coordinates = get_skel_coordinates(skeleton)
+
+
+    coordinates = np.vstack((coordinates, blobs))
+
 
     # Estimate spiral center in pre operative image
     center_pre = find_center(pre, pre_binarized, False)[0,0,0:2]
