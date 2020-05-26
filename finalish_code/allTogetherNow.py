@@ -2,6 +2,7 @@ import functions as f
 import os
 import cv2
 import numpy as np
+from scipy.optimize import fmin
 import matplotlib.pyplot as plt
 
 if __name__=="__main__":
